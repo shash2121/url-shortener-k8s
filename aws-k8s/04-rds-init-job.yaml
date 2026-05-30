@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS users (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email         VARCHAR UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role          VARCHAR DEFAULT 'user',
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS urls (
+      id          BIGSERIAL PRIMARY KEY,
+      short_code  VARCHAR(10) UNIQUE NOT NULL,
+      long_url    TEXT NOT NULL,
+      user_id     UUID REFERENCES users(id),
+      clicks      BIGINT DEFAULT 0,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      expires_at  TIMESTAMPTZ,
+      deleted_at  TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_urls_code ON urls(short_code);
+    CREATE INDEX IF NOT EXISTS idx_urls_expires ON urls(expires_at);
+
+    CREATE TABLE IF NOT EXISTS visits (
+      short_code  VARCHAR(10),
+      visited_at  TIMESTAMPTZ,
+      country     VARCHAR(2),
+      referrer    TEXT,
+      user_agent  TEXT
+    ) PARTITION BY RANGE (visited_at);
+
+    CREATE TABLE IF NOT EXISTS visits_default PARTITION OF visits DEFAULT;
+
+    CREATE TABLE IF NOT EXISTS cleanup_runs (
+      id            BIGSERIAL PRIMARY KEY,
+      run_at        TIMESTAMPTZ DEFAULT NOW(),
+      deleted_count INT,
+      duration_ms   INT
+    );
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rds-init
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: rds-init
+    spec:
+      serviceAccountName: linkshrink
+      restartPolicy: Never
+      containers:
+        - name: init-db
+          image: ubuntu:24.04
+          env:
+            - name: PGHOST
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: DB_HOST
+            - name: PGPORT
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: DB_PORT
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: linkshrink-aws-secret
+                  key: DB_USERNAME
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: linkshrink-aws-secret
+                  key: DB_PASSWORD
+            - name: PGDATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: DB_NAME
+          command:
+            - sh
+            - -c
+            - |
+              apt-get update && apt-get install -y postgresql-client
+              psql -f /init/init.sql
+          volumeMounts:
+            - name: init-sql
+              mountPath: /init
+            - name: secrets
+              mountPath: /mnt/secrets
+              readOnly: true
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: linkshrink-aws-secrets

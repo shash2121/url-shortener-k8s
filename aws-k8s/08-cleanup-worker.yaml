@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cleanup-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cleanup-worker
+  template:
+    metadata:
+      labels:
+        app: cleanup-worker
+    spec:
+      serviceAccountName: linkshrink
+      containers:
+        - name: cleanup-worker
+          image: sha2121/cleanup-svc:amd64
+          ports:
+            - containerPort: 3004
+          env:
+            # DB parts from ConfigMap
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: DB_NAME
+            # Credentials from Secrets Manager
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: linkshrink-aws-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: linkshrink-aws-secret
+                  key: DB_PASSWORD
+            # Assembled DATABASE_URL
+            - name: DATABASE_URL
+              value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=no-verify"
+            # Redis from ConfigMap
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: REDIS_URL
+            # App config
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: linkshrink-config
+                  key: CLEANUP_PORT
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: secrets
+              mountPath: /mnt/secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: linkshrink-aws-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cleanup-worker
+spec:
+  selector:
+    app: cleanup-worker
+  ports:
+    - port: 3004
+      targetPort: 3004

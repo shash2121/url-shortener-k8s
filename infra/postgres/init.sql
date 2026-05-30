@@ -1,0 +1,37 @@
+CREATE TABLE IF NOT EXISTS users (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         VARCHAR UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role          VARCHAR DEFAULT 'user',
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS urls (
+  id          BIGSERIAL PRIMARY KEY,
+  short_code  VARCHAR(10) UNIQUE NOT NULL,
+  long_url    TEXT NOT NULL,
+  user_id     UUID REFERENCES users(id),
+  clicks      BIGINT DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ,
+  deleted_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_urls_code ON urls(short_code);
+CREATE INDEX IF NOT EXISTS idx_urls_expires ON urls(expires_at);
+
+CREATE TABLE IF NOT EXISTS visits (
+  short_code  VARCHAR(10),
+  visited_at  TIMESTAMPTZ,
+  country     VARCHAR(2),
+  referrer    TEXT,
+  user_agent  TEXT
+) PARTITION BY RANGE (visited_at);
+
+CREATE TABLE IF NOT EXISTS visits_default PARTITION OF visits DEFAULT;
+
+CREATE TABLE IF NOT EXISTS cleanup_runs (
+  id            BIGSERIAL PRIMARY KEY,
+  run_at        TIMESTAMPTZ DEFAULT NOW(),
+  deleted_count INT,
+  duration_ms   INT
+);

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rds-postgres
+spec:
+  type: ExternalName
+  externalName: linkshrink-postgres-db.cm7gkmmq8ohp.us-east-1.rds.amazonaws.com
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cache
+spec:
+  type: ExternalName
+  externalName: dev-redis.qkknwp.0001.use1.cache.amazonaws.com

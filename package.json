@@ -1,0 +1,12 @@
+{
+  "name": "url-shortener",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "frontend"
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
